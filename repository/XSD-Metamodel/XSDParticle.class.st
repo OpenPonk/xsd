@@ -78,10 +78,11 @@ XSDParticle >> maxOccurs [
 ]
 
 { #category : #accessing }
-XSDParticle >> maxOccurs: anInteger [
+XSDParticle >> maxOccurs: anUnboundedNatural [
 	"<type: 'Integer' multiplicity: '0..1'>"
-	self assert: [ anInteger isNil or: [ anInteger isKindOf: Integer ] ].
-	maxOccurs := anInteger
+
+	self assert: [ anUnboundedNatural isNil or: [ (anUnboundedNatural isKindOf: Integer) or: [ anUnboundedNatural = '*' ] ] ].
+	maxOccurs := anUnboundedNatural
 ]
 
 { #category : #accessing }
