@@ -1,0 +1,15 @@
+SmalltalkCISpec {
+	#loading : [
+		SCIMetacelloLoadSpec {
+			#baseline : 'XSD',
+			#directory : 'repository',
+			#platforms : [ #pharo ]
+		}
+	],
+	#testing : {
+		#packages : [ 'XSD-Metamodel', 'XSD-Loader' ],
+		#coverage : {
+			#packages : [ 'XSD-Metamodel', 'XSD-Loader' ]
+		}
+	}
+}
