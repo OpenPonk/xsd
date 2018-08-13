@@ -2,34 +2,34 @@ Class {
 	#name : #XSDLoader,
 	#superclass : #Object,
 	#instVars : [
-		'types'
+		'baseDirectory',
+		'schemaSet'
 	],
 	#category : #'XSD-Loader'
 }
 
-{ #category : #'as yet unclassified' }
-XSDLoader >> elementDeclarationFor: anElement [
-	| element |
-	element := XSDElementDeclaration new
-		name: (anElement stringAt: 'name');
-		targetNamespace: '???';
-		element: anElement.
-	self deferredDo: [ element typeDefinition: (types at: (anElement stringAt: 'type')) ].
-	^ element
+{ #category : #lookup }
+XSDLoader >> detectSchemaFileForNamespace: aNamespace in: aDirectory [
+	^ (aDirectory files select: [ :each | each extension = 'xsd' ])
+		detect: [ :each | (each contents parseXML root attributeAt: 'targetNamespace') = aNamespace ]
 ]
 
-{ #category : #'as yet unclassified' }
-XSDLoader >> loadElementsOn: aSchema [
-	| elementDeclarations |
-	elementDeclarations := (aSchema document root elementsAt: 'xs:element')
-		collect: [ :anElement | self elementDeclarationFor: anElement ].
-	aSchema elementDeclarations: elementDeclarations
+{ #category : #loading }
+XSDLoader >> loadFrom: aStream [
+	| doc schema |
+	doc := (XMLDOMParser on: aStream readStream)
+		nodeFactory: (XMLPluggableElementFactory new elementClass: XMLDOMTypedElement);
+		parseDocument.
+	schema := self loadFromDocument: doc.
+	^ schema
 ]
 
-{ #category : #'as yet unclassified' }
+{ #category : #loading }
 XSDLoader >> loadFromDocument: aDocument [
 	| elementVisitor domVisitor |
 	elementVisitor := XSDLoadVisitor new.
+	elementVisitor
+		schemaLookup: [ :namespace :location | self lookupSchemaForNamespace: namespace location: location ].
 	domVisitor := XSDXMLElementVisitor new.
 	elementVisitor domVisitor: domVisitor.
 	domVisitor
@@ -38,9 +38,10 @@ XSDLoader >> loadFromDocument: aDocument [
 	^ elementVisitor schema
 ]
 
-{ #category : #'as yet unclassified' }
+{ #category : #loading }
 XSDLoader >> loadFromFile: aFileReference [
 	| doc schema |
+	baseDirectory := aFileReference parent.
 	doc := (XMLDOMParser on: aFileReference readStream)
 		nodeFactory: (XMLPluggableElementFactory new elementClass: XMLDOMTypedElement);
 		parseDocument.
@@ -49,24 +50,13 @@ XSDLoader >> loadFromFile: aFileReference [
 	^ schema
 ]
 
-{ #category : #'as yet unclassified' }
-XSDLoader >> readElement: anElement schema: aSchema [
-	
-]
-
-{ #category : #'as yet unclassified' }
-XSDLoader >> typeDefinitionFor: anElement [
-	^ XSDComplexTypeDefinition new
-		name: (anElement stringAt: 'name');
-		element: anElement;
-		targetNamespace: '???';
-		yourself
-]
-
-{ #category : #'as yet unclassified' }
-XSDLoader >> typeDefinitionsOn: aSchema [
-	| typeDefinitions |
-	typeDefinitions := (aSchema document root elementsAt: 'xs:complexType')
-		collect: [ :anElement | self typeDefinitionFor: anElement ].
-	aSchema typeDefinitions: typeDefinitions
+{ #category : #lookup }
+XSDLoader >> lookupSchemaForNamespace: aNamespace location: aLocation [
+	self assert: [ aNamespace isNotNil | aLocation isNotNil ].
+	aLocation
+		ifNotNil: [ self assert: [ baseDirectory isNotNil ].
+			^ self loadFromFile: baseDirectory / aLocation ].
+	aNamespace
+		ifNotNil: [ self assert: [ aNamespace isNotNil ].
+			^ self loadFromFile: (self detectSchemaFileForNamespace: aNamespace in: baseDirectory) ]
 ]

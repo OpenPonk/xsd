@@ -21,7 +21,7 @@ XSDLoaderTest >> exampleDocumentContents [
 <xs:complexType name="ct01">
 <xs:choice>
 <xs:element name="inline" type="xs:string" minOccurs="2" maxOccurs="3"/>
-<xs:any namespace="##other"/>
+<xs:any/>
 </xs:choice>
 </xs:complexType>
 </xs:schema>'
@@ -41,7 +41,6 @@ XSDLoaderTest >> setUp [
 
 { #category : #tests }
 XSDLoaderTest >> testLoadFromDocument [
-	self skip.
 	doc := self exampleDocument.
 	schema := loader loadFromDocument: doc.
 	self assert: schema document equals: doc.

@@ -4,7 +4,8 @@ Class {
 	#instVars : [
 		'schema',
 		'deferredActions',
-		'domVisitor'
+		'domVisitor',
+		'schemaLookup'
 	],
 	#category : #'XSD-Loader'
 }
@@ -37,6 +38,11 @@ XSDLoadVisitor >> lookupElementFor: anElement [
 	^ domVisitor lookupElementFor: anElement
 ]
 
+{ #category : #accessing }
+XSDLoadVisitor >> lookupSchemaForNamespace: aNamespace location: aLocation [
+	^ schemaLookup value: aNamespace value: aLocation
+]
+
 { #category : #'instance creation' }
 XSDLoadVisitor >> newInstanceOf: aClass element: anElement [
 	^ aClass new
@@ -62,12 +68,6 @@ XSDLoadVisitor >> processModelGroup: group [
 					subParticle ])
 ]
 
-{ #category : #visiting }
-XSDLoadVisitor >> resolveSchemaFromImport: anImport [
-	self flag: 'fixme'.
-	^ XSDLoader new loadFromFile: 'D:\ns-prog\elements-io-xsd\Schemas' asFileReference / anImport schemaLocation
-]
-
 { #category : #'post-processing' }
 XSDLoadVisitor >> runDeferredActions [
 	deferredActions do: #value
@@ -79,6 +79,11 @@ XSDLoadVisitor >> schema [
 ]
 
 { #category : #accessing }
+XSDLoadVisitor >> schemaLookup: aBlock [
+	schemaLookup := aBlock
+]
+
+{ #category : #accessing }
 XSDLoadVisitor >> typeNamed: aTypeName [
 	aTypeName ifEmpty: [ ^ nil ].
 	(aTypeName beginsWith: 'xs:')
@@ -87,6 +92,8 @@ XSDLoadVisitor >> typeNamed: aTypeName [
 		ifTrue: [ ^ schema typeDefinitions detect: [ :each | each name = (aTypeName withoutPrefix: 'ns:') ] ].
 	(aTypeName beginsWith: 'el:')
 		ifTrue: [ ^ schema typeDefinitions detect: [ :each | each name = (aTypeName withoutPrefix: 'el:') ] ].
+	(aTypeName includes: $:)
+		ifTrue: [ ^ schema typeDefinitions detect: [ :each | each name = (aTypeName splitOn: ':') second ] ].
 	^ schema typeDefinitions detect: [ :each | each name = aTypeName ]
 ]
 
@@ -99,6 +106,14 @@ XSDLoadVisitor >> visitAll: anElement [
 	particle content: modelGroup.
 	self processModelGroup: modelGroup.
 	^ particle
+]
+
+{ #category : #visiting }
+XSDLoadVisitor >> visitAnnotation: anElement [
+	| annotation |
+	annotation := self newInstanceOf: XSDAnnotation element: anElement.
+	"annotation userInformation: anElement children."
+	^ annotation
 ]
 
 { #category : #visiting }
@@ -133,8 +148,15 @@ XSDLoadVisitor >> visitChoice: anElement [
 ]
 
 { #category : #visiting }
+XSDLoadVisitor >> visitComplexContent: anElement [
+	self assert: [ anElement elements size = 1 ].
+	self assert: [ anElement firstElement name = 'xs:extension' ]. 
+	^ domVisitor visitElement: anElement firstElement
+]
+
+{ #category : #visiting }
 XSDLoadVisitor >> visitComplexType: anElement [
-	| definition attributeElements contentElements |
+	| definition attributeElements elements |
 	definition := self newInstanceOf: XSDComplexTypeDefinition element: anElement.
 	definition name: (anElement stringAt: 'name').
 	attributeElements := anElement elementsAt: 'xs:attribute'.
@@ -142,10 +164,18 @@ XSDLoadVisitor >> visitComplexType: anElement [
 		attributeUses:
 			(attributeElements
 				collect: [ :el | XSDAttributeUse new content: (domVisitor visitElement: el) ]).
-	contentElements := anElement elements copyWithoutAll: attributeElements.
-	self assert: [ contentElements size <= 1 ].
-	contentElements
-		ifNotEmpty: [ definition content: (domVisitor visit: contentElements first) ].
+	elements := anElement elements copyWithoutAll: attributeElements.
+	(anElement elementsAt: 'xs:annotation')
+		ifNotEmpty: [ :annotationElements | 
+			definition annotations: (domVisitor visitGroup: annotationElements).
+			elements := elements copyWithoutAll: annotationElements ].
+	self assert: [ elements size <= 1 ].
+	elements
+		ifNotEmpty: [ definition content: (domVisitor visit: elements first).
+			elements first name = 'xs:complexContent'
+				ifTrue: [ self
+						deferredDo: [ definition
+								baseTypeDefinition: (self typeNamed: (elements first firstElement attributeAt: 'base')) ] ] ].
 	^ definition
 ]
 
@@ -169,6 +199,13 @@ XSDLoadVisitor >> visitEnumeration: anElement [
 	^ self visitFacet: XSDEnumerationFacet element: anElement
 ]
 
+{ #category : #visiting }
+XSDLoadVisitor >> visitExtension: anElement [
+	self assert: [ anElement elements size = 1 ].
+	self assert: [ anElement firstElement name = 'xs:sequence' ].
+	^ self visitSequence: anElement firstElement
+]
+
 { #category : #'visiting - internal' }
 XSDLoadVisitor >> visitFacet: aFacetClass element: anElement [
 	| facet |
@@ -184,18 +221,19 @@ XSDLoadVisitor >> visitImport: anElement [
 	(anElement stringAt: 'schemaLocation')
 		ifNotEmpty: [ :schemaLocation | import schemaLocation: schemaLocation ].
 	(anElement stringAt: 'namespace') ifNotEmpty: [ :namespace | import namespace: namespace ].
-	import resolvedSchema: (self resolveSchemaFromImport: import).
+	import
+		resolvedSchema: (self lookupSchemaForNamespace: import namespace location: import schemaLocation).
 	^ import
 ]
 
 { #category : #visiting }
-XSDLoadVisitor >> visitInclude: anElement [ 
-	| import |
-	import := self newInstanceOf: XSDInclude element: anElement.
+XSDLoadVisitor >> visitInclude: anElement [
+	| include |
+	include := self newInstanceOf: XSDInclude element: anElement.
 	(anElement stringAt: 'schemaLocation')
-		ifNotEmpty: [ :schemaLocation | import schemaLocation: schemaLocation ].
-	import resolvedSchema: (self resolveSchemaFromImport: import).
-	^ import
+		ifNotEmpty: [ :schemaLocation | include schemaLocation: schemaLocation ].
+	include resolvedSchema: (self lookupSchemaForNamespace: nil location: include schemaLocation).
+	^ include
 ]
 
 { #category : #visiting }
@@ -217,8 +255,9 @@ XSDLoadVisitor >> visitRestriction: anElement [
 XSDLoadVisitor >> visitSchema: anElement [
 	schema := XSDSchema new
 		document: anElement document;
-		element: anElement;
-		targetNamespace: (anElement stringAt: 'targetNamespace').
+		element: anElement.
+	(anElement stringAt: 'targetNamespace')
+		ifNotEmpty: [ :targetNamespace | schema targetNamespace: targetNamespace ].
 	schema contents: (domVisitor visitGroup: anElement elements).
 	self runDeferredActions.
 	^ schema
@@ -241,15 +280,19 @@ XSDLoadVisitor >> visitSequence: anElement [
 
 { #category : #visiting }
 XSDLoadVisitor >> visitSimpleType: anElement [
-	| definition |
+	| definition elements |
 	definition := self newInstanceOf: XSDSimpleTypeDefinition element: anElement.
 	definition name: (anElement stringAt: 'name').
-	self
-		assert: [ anElement elements size = 1 and: [ anElement firstElement name = 'xs:restriction' ] ].
-	(anElement firstElement stringAt: 'base')
+	elements := anElement elements asArray.
+	(elements select: [ :each | each name = 'xs:annotation' ])
+		ifNotEmpty: [ :annotationElements | 
+			definition annotations: (domVisitor visitGroup: annotationElements).
+			elements := elements copyWithoutAll: annotationElements ].
+	self assert: [ elements size = 1 and: [ elements first name = 'xs:restriction' ] ].
+	(elements first stringAt: 'base')
 		ifEmpty: [ self deferredDo: [ definition baseTypeDefinition: (self typeNamed: 'xs:anySimpleType') ] ]
 		ifNotEmpty: [ :base | self deferredDo: [ definition baseTypeDefinition: (self typeNamed: base) ] ].
-	definition facets: (domVisitor visitGroup: anElement firstElement elements).
+	definition facets: (domVisitor visitGroup: elements first elements).
 	^ definition
 ]
 
