@@ -59,8 +59,10 @@ XSDLoadVisitor >> processModelGroup: group [
 				collect: [ :el | 
 					| element subParticle |
 					element := domVisitor visitElement: el.
-					subParticle := XSDParticle new.
-					subParticle content: element.
+					(element oclIsKindOf: 'Particle')
+						ifTrue: [ subParticle := element ]
+						ifFalse: [ subParticle := XSDParticle new.
+							subParticle content: element ].
 					(el stringAt: 'minOccurs')
 						ifNotEmpty: [ :minOccurs | subParticle minOccurs: minOccurs asNumber ].
 					(el stringAt: 'maxOccurs')
