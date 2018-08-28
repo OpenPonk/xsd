@@ -17,6 +17,15 @@ XSDLoadVisitor >> asUnboundedNatural: aString [
 	^ aString asNumber
 ]
 
+{ #category : #visiting }
+XSDLoadVisitor >> consumeAnnotations: aCollection element: aXSDElementDeclaration [
+	| annotations |
+	annotations := aCollection elementsAt: 'xs:annotation'.
+	aCollection removeAllSuchThat: [ :each | each isNamed: 'xs:annotation' ].
+	self assert: [ annotations size <= 1 ].
+	annotations ifNotEmpty: [ aXSDElementDeclaration annotation: (domVisitor visitElement: annotations first) ]
+]
+
 { #category : #'post-processing' }
 XSDLoadVisitor >> deferredDo: aBlock [
 	deferredActions add: aBlock
@@ -183,16 +192,18 @@ XSDLoadVisitor >> visitComplexType: anElement [
 
 { #category : #visiting }
 XSDLoadVisitor >> visitElement: anElement [
-	| element |
+	| element elements |
 	element := self newInstanceOf: XSDElementDeclaration element: anElement.
 	element
 		name: (anElement stringAt: 'name');
 		schema: schema.
 	(anElement stringAt: 'type') ifNotEmpty: [ :typeName | self deferredDo: [ element type: (self typeNamed: typeName) ] ].
+	elements := anElement elements.
+	self consumeAnnotations: elements element: element.
 	(anElement stringAt: 'type')
-		ifEmpty: [ self assert: [ anElement elements size <= 1 ].
-			anElement elements size = 1
-				ifTrue: [ element type: (self visitComplexType: anElement firstElement) ] ].
+		ifEmpty: [ self assert: [ elements size <= 1 ].
+			elements size = 1
+				ifTrue: [ element type: (self visitComplexType: elements first) ] ].
 	^ element
 ]
 
